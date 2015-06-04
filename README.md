@@ -1,4 +1,4 @@
 ## dockermaster
 
-Wrapper script for managing docker containers
+Bash script for managing docker containers
 
