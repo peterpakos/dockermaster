@@ -109,7 +109,7 @@ docker_stop () {
     NODES="$@"
     NIDS="$#"
   else
-    NODES=$(docker ps | tail -n +2 | awk '{print $1}' | tac)
+    NODES=$(docker ps -q | tac)
     NIDS=$(echo "${NODES}" | wc -l)
   fi
   if [ -n "${NODES}" ]; then
@@ -145,7 +145,7 @@ docker_rm () {
     NODES="$@"
     NIDS="$#"
   else
-    NODES=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
+    NODES=$(docker ps -q -a | tac)
     NIDS=$(echo "${NODES}" | wc -l)
   fi
   if [ -n "${NODES}" ]; then
@@ -183,7 +183,7 @@ docker_rm () {
 }
 
 docker_list () {
-  IDS=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
+  IDS=$(docker ps -q -a | tac)
   if [ -n "${IDS}" ]; then
     NIDS=$(echo "${IDS}" | wc -l)
     S=$(singular_plural $NIDS)
@@ -209,7 +209,7 @@ update_hosts () {
   echo -n "Updating /etc/hosts "
   echo -e "127.0.0.1\tlocalhost.localdomain localhost" \
     > ${TMP_HOSTS}
-  IDS=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
+  IDS=$(docker ps -q -a | tac)
   for ID in $IDS; do
     CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
@@ -217,7 +217,12 @@ update_hosts () {
     echo -e "${CIP}\t${CHOSTNAME}.${CDOMAIN} ${CHOSTNAME}" >> ${TMP_HOSTS}
   done
   if sudo mv ${TMP_HOSTS} /etc/hosts &>/dev/null; then
-    echo "[OK]"
+    if docker ps -q -a \
+      | xargs docker inspect -f '{{.HostsPath}}' \
+      | xargs -n1 sudo cp /etc/hosts; then
+      echo "[OK]"
+    else
+      echo "[FAILED]"
   else
     echo "[FAILED]"
   fi
