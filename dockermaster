@@ -90,7 +90,7 @@ docker_run () {
   SUCCESS="0"
   echo "Creating and starting ${N} node${S}:"
   for ((i=1;i<=N;i++)); do
-    echo -n "- ${HOSTNAME}${i} "
+    echo -n "- ${HOSTNAME}${i}.${DOMAIN} "
     if docker run -d --name ${HOSTNAME}${i} -h ${HOSTNAME}${i}.${DOMAIN} \
       ${IMAGE} &>/dev/null; then
       CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' \
@@ -162,7 +162,8 @@ docker_rm () {
       continue
     else
       CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
-      echo -n "- ${CHOSTNAME} "
+      CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${NODE}")
+      echo -n "- ${CHOSTNAME}.${CDOMAIN} "
       if [ "$CSTATE" = "true" ]; then
         echo -n "[STOPPING] "
         if ! docker stop "${NODE}" &>/dev/null; then
@@ -194,19 +195,19 @@ docker_list () {
   fi
   for ID in $IDS; do
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
+    CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${ID}")
     CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
     CSTATE=$(docker inspect --format '{{ .State.Running }}' "${ID}")
     if [ "${CSTATE}" == "true" ]; then
-      echo "- ${CHOSTNAME} [RUNNING] (${CIP})"
+      echo "- ${CHOSTNAME}.${CDOMAIN} [RUNNING] (${CIP})"
     else
-      echo "- ${CHOSTNAME} [STOPPED]"
+      echo "- ${CHOSTNAME}.${CDOMAIN} [STOPPED]"
     fi
   done
-
 }
 
 update_hosts () {
-  echo -n "Updating /etc/hosts "
+  echo -n "Updating /etc/hosts file "
   echo -e "127.0.0.1\tlocalhost.localdomain localhost" \
     > ${TMP_HOSTS}
   IDS=$(docker ps -q -a | tac)
@@ -217,14 +218,21 @@ update_hosts () {
     echo -e "${CIP}\t${CHOSTNAME}.${CDOMAIN} ${CHOSTNAME}" >> ${TMP_HOSTS}
   done
   if sudo mv ${TMP_HOSTS} /etc/hosts &>/dev/null; then
-    if docker ps -q -a \
-      | xargs docker inspect -f '{{.HostsPath}}' \
-      | xargs -n1 sudo cp /etc/hosts; then
+    echo -n "[OK]"
+  else
+    echo "[FAILED]"
+    return 1
+  fi
+  if [ -n "$IDS" ]; then
+    echo -n ", syncing with containers "
+    if docker ps -q -a | xargs docker inspect -f '{{.HostsPath}}' | xargs -n1 sudo cp /etc/hosts; then
       echo "[OK]"
     else
       echo "[FAILED]"
+      return 1
+    fi
   else
-    echo "[FAILED]"
+    echo
   fi
 }
 
