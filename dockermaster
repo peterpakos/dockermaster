@@ -6,7 +6,7 @@
 
 ### Variables
 
-_VERSION="1.0"
+_VERSION="15.6.4"
 _DIR="$(cd "$(dirname "${0}")" && pwd)"
 _FILE="$(basename "${0}")"
 _HOSTNAME=$(hostname -s)
