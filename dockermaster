@@ -51,6 +51,24 @@ version        Print version number
 EOF
 }
 
+check_sudo () {
+  if ! sudo -n true &>/dev/null; then
+    echo "Please set up passwordless sudo for user ${USER} and try again."
+    exit 1
+  fi
+  return 0
+}
+
+check_command () {
+  for C in "$@" ; do
+    if ! which "${C}" > /dev/null; then
+      echo "Command \"${C}\" not found, please ensure the package is installed."
+      exit 1
+    fi
+  done
+  return 0
+}
+
 docker_run () {
   echo "Creating and starting ${N} node(s):"
   for ((i=1;i<=N;i++)); do
@@ -151,6 +169,9 @@ trap 'err "Received signal SIGINT"' SIGINT
 trap 'err "Received signal SIGTERM"' SIGTERM
 
 ### Main code
+
+check_sudo
+check_command "docker"
 
 # Check arguments
 
