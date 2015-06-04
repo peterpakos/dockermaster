@@ -4,34 +4,48 @@
 #
 # Copyright © 2015 Peter Pakos
 
+### Runtime settings
+
+set -o errexit  # -e
+set -o errtrace # -E
+set -o nounset  # -u
+set -o pipefail
+
 ### Variables
-
-_VERSION="15.6.4"
-_DIR="$(cd "$(dirname "${0}")" && pwd)"
-_FILE="$(basename "${0}")"
-_HOSTNAME=$(hostname -s)
-
-TMP_HOSTS="/tmp/${_FILE}.tmp"
 
 N="1"
 HOSTNAME="node"
 DOMAIN="localdomain"
 IMAGE="peterpakos/centos"
 
+_VERSION="15.6.4"
+_DIR="$(cd "$(dirname "${0}")" && pwd)"
+_FILE="$(basename "${0}")"
+_HOSTNAME=$(hostname -s)
+
+TMP_HOSTS="/tmp/${_FILE}_hosts.tmp"
+
 ### Functions
 
-cleanup() {
-  return 1
-}
-
-err() {
-  echo "[$(date +'%d/%m/%Y %H:%M:%S')]: $@" >&2
-  cleanup
+error () {
+  echo "${_FILE}: ${@}"
   exit 1
 }
 
+cleanup () {
+  rm -f "${TMP_HOSTS}"
+}
+
+singular_plural () {
+  if [ "$1" -eq "1" ]; then
+    return
+  else
+    echo "s"
+  fi
+}
+
 display_version () {
-   echo "${_FILE} version ${_VERSION}"
+  echo "${_FILE} version ${_VERSION}"
 }
 
 display_help () {
@@ -43,7 +57,7 @@ run            Create and run containers
  -n <n>        Number of nodes (default: ${N})
  -h <hostname> Base hostname (default: ${HOSTNAME})
  -d <domain>   Domain (default: ${DOMAIN})
-stop           Stop all containers
+stop [<node>]  Stop containers, all if empty list
 rm             Remove all containers
 list           Print list of containers
 help           Print this help summary page
@@ -53,93 +67,147 @@ EOF
 
 check_sudo () {
   if ! sudo -n true &>/dev/null; then
-    echo "Please set up passwordless sudo for user ${USER} and try again."
-    exit 1
+    error "Please set up passwordless sudo for user ${USER} and try again."
   fi
-  return 0
 }
 
 check_command () {
   for C in "$@" ; do
-    if ! which "${C}" > /dev/null; then
-      echo "Command \"${C}\" not found, please ensure the package is installed."
-      exit 1
+    if ! which "${C}" &>/dev/null; then
+      error "Command \"${C}\" not found"
     fi
   done
-  return 0
 }
 
 docker_run () {
-  echo "Creating and starting ${N} node(s):"
+  if [[ ! $N =~ ^[0-9]+$ ]]; then
+    error "Number of nodes must be numeric: ${N}"
+  fi
+  if [ $N -lt 1 -o $N -gt 20 ]; then
+    error "Incorrect number of nodes (must be between 1 and 20): ${N}"
+  fi
+  S=$(singular_plural $N)
+  SUCCESS="0"
+  echo "Creating and starting ${N} node${S}:"
   for ((i=1;i<=N;i++)); do
     echo -n "- ${HOSTNAME}${i} "
-    if ID=$(docker run -d --name ${HOSTNAME}${i} -h ${HOSTNAME}${i}.${DOMAIN} ${IMAGE} 2>/dev/null); then
-      CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
+    if docker run -d --name ${HOSTNAME}${i} -h ${HOSTNAME}${i}.${DOMAIN} \
+      ${IMAGE} &>/dev/null; then
+      CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' \
+        "${HOSTNAME}${i}")
       echo "(${CIP}) [OK]"
+      SUCCESS="1"
     else
       echo "[FAILED]"
     fi
   done
-  return 0
+  if [ "$SUCCESS" == "1" ]; then update_hosts; fi
 }
 
 docker_stop () {
-  IDS=$(docker ps | tail -n +2 | awk '{print $1}' | tac)
-  if [ -n "${IDS}" ]; then
-    echo "Stopping nodes:"
+  if [ "$#" -gt 0 ]; then
+    NODES="$@"
+    NIDS="$#"
+  else
+    NODES=$(docker ps | tail -n +2 | awk '{print $1}' | tac)
+    NIDS=$(echo "${NODES}" | wc -l)
   fi
-  for ID in $IDS; do
-    CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
-    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
+  if [ -n "${NODES}" ]; then
+    S=$(singular_plural $NIDS)
+    echo "Stopping ${NIDS} node${S}:"
+  else
+    echo "No running containers found"
+    return 0
+  fi
+  for NODE in $NODES; do
+    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+      echo "- ${NODE} [NOT FOUND]"
+      continue
+    else
+      if [ "$CSTATE" = "false" ]; then
+        echo "- ${NODE} [ALREADY STOPPED]"
+        continue;
+      fi
+    fi
+    CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
+    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
     echo -n "- ${CHOSTNAME} (${CIP}) "
-    if docker stop "${ID}" &>/dev/null; then
-      echo "[OK]"
+    if docker stop "${NODE}" &>/dev/null; then
+      echo "[STOPPED]"
     else
       echo "[FAILED]"
     fi
   done
-  return 0
 }
 
 docker_rm () {
-  IDS=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
-  if [ -n "${IDS}" ]; then
-    echo "Removing nodes:"
+  if [ "$#" -gt 0 ]; then
+    NODES="$@"
+    NIDS="$#"
+  else
+    NODES=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
+    NIDS=$(echo "${NODES}" | wc -l)
   fi
-  for ID in $IDS; do
-    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
-    echo -n "- ${CHOSTNAME} "
-    if docker rm "${ID}" &>/dev/null; then
-      echo "[OK]"
+  if [ -n "${NODES}" ]; then
+    S=$(singular_plural $NIDS)
+    echo "Removing ${NIDS} node${S}:"
+  else
+    echo "No containers found"
+    return 0
+  fi
+  SUCCESS="0"
+  for NODE in $NODES; do
+    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+      echo "- ${NODE} [NOT FOUND]"
+      continue
+    else
+      CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+      echo -n "- ${CHOSTNAME} "
+      if [ "$CSTATE" = "true" ]; then
+        echo -n "[STOPPING] "
+        if ! docker stop "${NODE}" &>/dev/null; then
+          echo "[FAILED]"
+          continue
+        fi
+      fi
+    fi
+    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+    if docker rm "${NODE}" &>/dev/null; then
+      echo "[REMOVED]"
+      SUCCESS="1"
     else
       echo "[FAILED]"
     fi
   done
-  return 0
+  if [ "$SUCCESS" == "1" ]; then update_hosts; fi
 }
 
 docker_list () {
   IDS=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
   if [ -n "${IDS}" ]; then
-    echo "List of containers:"
+    NIDS=$(echo "${IDS}" | wc -l)
+    S=$(singular_plural $NIDS)
+    echo "Found ${NIDS} container${S}:"
+  else
+    echo "No containers found"
+    return 0
   fi
   for ID in $IDS; do
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
     CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
     CSTATE=$(docker inspect --format '{{ .State.Running }}' "${ID}")
     if [ "${CSTATE}" == "true" ]; then
-      echo "- ${CHOSTNAME} (${CIP}) running"
+      echo "- ${CHOSTNAME} [RUNNING] (${CIP})"
     else
-      echo "- ${CHOSTNAME} stopped"
+      echo "- ${CHOSTNAME} [STOPPED]"
     fi
   done
 
-  return 0
 }
 
 update_hosts () {
   echo -n "Updating /etc/hosts "
-  echo -e "127.0.0.1\t${_HOSTNAME} localhost.localdomain localhost" \
+  echo -e "127.0.0.1\tlocalhost.localdomain localhost" \
     > ${TMP_HOSTS}
   IDS=$(docker ps -a | tail -n +2 | awk '{print $1}' | tac)
   for ID in $IDS; do
@@ -153,20 +221,7 @@ update_hosts () {
   else
     echo "[FAILED]"
   fi
-  return 0
 }
-
-### Runtime
-
-set -o errexit
-set -o errtrace
-set -o nounset
-set -o pipefail
-
-trap 'err "Error in ${_FILE} at line $(( ${LINENO} - 1 )) (exit code ${?})"' ERR
-trap 'err "Received signal SIGHUP"' SIGHUP
-trap 'err "Received signal SIGINT"' SIGINT
-trap 'err "Received signal SIGTERM"' SIGTERM
 
 ### Main code
 
@@ -187,15 +242,7 @@ case "$1" in
       case ${OPT} in
       n)
         N=${OPTARG}
-        if [[ ! $N =~ ^[0-9]+$ ]]; then
-          echo "Invalid argument (not numeric): ${N}"
-          exit 1
-        fi
-        if [ $N -lt 1 -o $N -gt 10 ]; then
-          echo "Invalid argument (wrong number): ${N}"
-          exit 1
-        fi
-        ;;
+       ;;
       h)
         HOSTNAME=${OPTARG}
         ;;
@@ -216,15 +263,22 @@ case "$1" in
       esac
     done
     docker_run
-    update_hosts
     ;;
   stop)
-    docker_stop
+    if [ $# -ge 2 ]; then
+      NODES="${@:2}"
+    else
+      NODES=""
+    fi
+    docker_stop $NODES
     ;;
   rm)
-    docker_stop
-    docker_rm
-    update_hosts
+    if [ $# -ge 2 ]; then
+      NODES="${@:2}"
+    else
+      NODES=""
+    fi
+    docker_rm $NODES
     ;;
   list)
     docker_list
