@@ -1,14 +1,15 @@
 ## dockermaster version 15.6.5
 ```
+dockermaster version 15.6.5
 Usage: dockermaster COMMAND [OPTIONS]
 AVAILABLE COMMANDS AND OPTIONS:
 run            Create and run containers
  -n <n>        Number of nodes (default: 1)
  -h <hostname> Base hostname (default: node)
  -d <domain>   Domain (default: localdomain)
-stop [<node>]  Stop containers, all if empty list
-start [<node>] Start containers, all if empty list
-rm             Remove all containers
+stop [<node>]  Stop containers, all if none supplied
+start [<node>] Start containers, all if none supplied
+rm [<node>]    Remove containers, all if none supplied
 list           Print list of containers
 help           Print this help summary page
 version        Print version number
@@ -20,5 +21,5 @@ Start 5 containers vm1, vm2... vm5 using image wandisco/centos:latest:
 Stop container called node12:
   dockermaster stop node12
 Remove all containers:
-  dockermaster rm<code>
+  dockermaster rm
 ```
