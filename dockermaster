@@ -18,7 +18,7 @@ HOSTNAME="node"
 DOMAIN="localdomain"
 IMAGE="peterpakos/centos"
 
-_VERSION="15.6.4"
+_VERSION="15.6.5"
 _DIR="$(cd "$(dirname "${0}")" && pwd)"
 _FILE="$(basename "${0}")"
 _HOSTNAME=$(hostname -s)
@@ -58,10 +58,20 @@ run            Create and run containers
  -h <hostname> Base hostname (default: ${HOSTNAME})
  -d <domain>   Domain (default: ${DOMAIN})
 stop [<node>]  Stop containers, all if empty list
+start [<node>] Start containers, all if empty list
 rm             Remove all containers
 list           Print list of containers
 help           Print this help summary page
 version        Print version number
+EXAMPLES:
+Start single container centos-server.test.wandisco.com:
+  dockermaster run -h centos-server -d test.wandisco.com
+Start 5 containers vm1, vm2... vm5 using image wandisco/centos:latest:
+  dockermaster run -n 5 -h vm -i wandisco/centos:latest
+Stop container called node12:
+  dockermaster stop node12
+Remove all containers:
+  dockermaster rm
 EOF
 }
 
@@ -89,12 +99,22 @@ docker_run () {
   S=$(singular_plural $N)
   SUCCESS="0"
   echo "Creating and starting ${N} node${S}:"
+
   for ((i=1;i<=N;i++)); do
-    echo -n "- ${HOSTNAME}${i}.${DOMAIN} "
-    if docker run -d --name ${HOSTNAME}${i} -h ${HOSTNAME}${i}.${DOMAIN} \
-      ${IMAGE} &>/dev/null; then
+    if [ $N -eq 1 ]; then
+      CHOSTNAME="${HOSTNAME}"
+    else
+      CHOSTNAME="${HOSTNAME}${i}"
+    fi
+    echo -n "- ${CHOSTNAME}.${DOMAIN} "
+    if docker inspect "${CHOSTNAME}" &>/dev/null; then
+      echo "[ALREADY EXISTS]"
+      continue
+    fi
+    if docker run -d --name "${CHOSTNAME}" -h "${CHOSTNAME}.${DOMAIN}" \
+      "${IMAGE}" &>/dev/null; then
       CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' \
-        "${HOSTNAME}${i}")
+        "${CHOSTNAME}")
       echo "(${CIP}) [OK]"
       SUCCESS="1"
     else
@@ -134,6 +154,42 @@ docker_stop () {
     echo -n "- ${CHOSTNAME} (${CIP}) "
     if docker stop "${NODE}" &>/dev/null; then
       echo "[STOPPED]"
+    else
+      echo "[FAILED]"
+    fi
+  done
+}
+
+docker_start () {
+  if [ $# -gt 0 ]; then
+    NODES=$@
+    NIDS=$#
+  else
+    NODES=$(docker ps -q -f "status=exited" | tac)
+    NIDS=$(echo "${NODES}" | wc -l)
+  fi
+  if [ -n "${NODES}" ]; then
+    S=$(singular_plural $NIDS)
+    echo "Starting ${NIDS} node${S}:"
+  else
+    echo "No stopped containers found"
+    return 0
+  fi
+  for NODE in $NODES; do
+    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+      echo "- ${NODE} [NOT FOUND]"
+      continue
+    else
+      if [ "$CSTATE" = "true" ]; then
+        echo "- ${NODE} [ALREADY RUNNING]"
+        continue;
+      fi
+    fi
+    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+    echo -n "- ${CHOSTNAME} "
+    if docker start "${NODE}" &>/dev/null; then
+      CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
+      echo "[STARTED] (${CIP})"
     else
       echo "[FAILED]"
     fi
@@ -284,6 +340,14 @@ case "$1" in
       NODES=""
     fi
     docker_stop $NODES
+    ;;
+  start)
+    if [ $# -ge 2 ]; then
+      NODES="${@:2}"
+    else
+      NODES=""
+    fi
+    docker_start $NODES
     ;;
   rm)
     if [ $# -ge 2 ]; then
