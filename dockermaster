@@ -178,6 +178,7 @@ docker_start () {
     echo "No stopped containers found"
     return 0
   fi
+  SUCCESS="0"
   for NODE in $NODES; do
     if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
@@ -193,10 +194,12 @@ docker_start () {
     if docker start "${NODE}" &>/dev/null; then
       CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
       echo "[STARTED] (${CIP})"
+      SUCCESS="1"
     else
       echo "[FAILED]"
     fi
   done
+  if [ "$SUCCESS" == "1" ]; then update_hosts; fi
 }
 
 docker_rm () {
