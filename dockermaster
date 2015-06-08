@@ -111,7 +111,10 @@ docker_run () {
       echo "[ALREADY EXISTS]"
       continue
     fi
-    if docker run -d --name "${CHOSTNAME}" -h "${CHOSTNAME}.${DOMAIN}" \
+    if docker run -d \
+      --name "${CHOSTNAME}" \
+      --hostname "${CHOSTNAME}.${DOMAIN}" \
+      --volume /usr/java:/usr/java \
       "${IMAGE}" &>/dev/null; then
       CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' \
         "${CHOSTNAME}")
