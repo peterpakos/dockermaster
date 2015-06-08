@@ -1,6 +1,6 @@
 ## dockermaster version 15.6.5
 ```
-dockermaster version 15.6.5
+dockermaster version 15.6.8
 Usage: dockermaster COMMAND [OPTIONS]
 AVAILABLE COMMANDS AND OPTIONS:
 run            Create and run containers

@@ -18,7 +18,7 @@ HOSTNAME="node"
 DOMAIN="localdomain"
 IMAGE="peterpakos/centos"
 
-_VERSION="15.6.5"
+_VERSION="15.6.8"
 _DIR="$(cd "$(dirname "${0}")" && pwd)"
 _FILE="$(basename "${0}")"
 _HOSTNAME=$(hostname -s)
