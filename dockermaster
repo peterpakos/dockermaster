@@ -16,9 +16,9 @@ set -o pipefail
 N="1"
 HOSTNAME="node"
 DOMAIN="localdomain"
-IMAGE="peterpakos/centos"
+IMAGE="wandisco/centos6"
 
-_VERSION="15.6.8"
+_VERSION="15.7.8"
 _DIR="$(cd "$(dirname "${0}")" && pwd)"
 _FILE="$(basename "${0}")"
 _HOSTNAME=$(hostname -s)
@@ -53,16 +53,21 @@ display_help () {
   cat << EOF
 Usage: ${_FILE} COMMAND [OPTIONS]
 AVAILABLE COMMANDS AND OPTIONS:
-run            Create and run containers
- -n <n>        Number of nodes (default: ${N})
- -h <hostname> Base hostname (default: ${HOSTNAME})
- -d <domain>   Domain (default: ${DOMAIN})
-stop [<node>]  Stop containers, all if none supplied
-start [<node>] Start containers, all if none supplied
-rm [<node>]    Remove containers, all if none supplied
-list           Print list of containers
-help           Print this help summary page
-version        Print version number
+run               Create and run containers
+ -n <n>           Number of nodes (default: ${N})
+ -h <hostname>    Base hostname (default: ${HOSTNAME})
+ -d <domain>      Domain (default: ${DOMAIN})
+ -i <image>       Image (default: ${IMAGE})
+stop <id>/<name>  Stop containers
+stopall           Stop all containers
+start <id>/<name> Start containers
+startall          Start all containers
+rm <id>/<name>    Remove containers
+rmall             Remove all containers
+list              Print list of containers
+hosts             Update /etc/hosts file
+help              Print this help summary page
+version           Print version number
 EXAMPLES:
 Start single container centos-server.test.wandisco.com:
   dockermaster run -h centos-server -d test.wandisco.com
@@ -71,7 +76,7 @@ Start 5 containers vm1, vm2... vm5 using image wandisco/centos:latest:
 Stop container called node12:
   dockermaster stop node12
 Remove all containers:
-  dockermaster rm
+  dockermaster rmall
 EOF
 }
 
@@ -127,42 +132,6 @@ docker_run () {
   if [ "$SUCCESS" == "1" ]; then update_hosts; fi
 }
 
-docker_stop () {
-  if [ "$#" -gt 0 ]; then
-    NODES="$@"
-    NIDS="$#"
-  else
-    NODES=$(docker ps -q | tac)
-    NIDS=$(echo "${NODES}" | wc -l)
-  fi
-  if [ -n "${NODES}" ]; then
-    S=$(singular_plural $NIDS)
-    echo "Stopping ${NIDS} node${S}:"
-  else
-    echo "No running containers found"
-    return 0
-  fi
-  for NODE in $NODES; do
-    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
-      echo "- ${NODE} [NOT FOUND]"
-      continue
-    else
-      if [ "$CSTATE" = "false" ]; then
-        echo "- ${NODE} [ALREADY STOPPED]"
-        continue;
-      fi
-    fi
-    CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
-    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
-    echo -n "- ${CHOSTNAME} (${CIP}) "
-    if docker stop "${NODE}" &>/dev/null; then
-      echo "[STOPPED]"
-    else
-      echo "[FAILED]"
-    fi
-  done
-}
-
 docker_start () {
   if [ $# -gt 0 ]; then
     NODES=$@
@@ -194,6 +163,45 @@ docker_start () {
     if docker start "${NODE}" &>/dev/null; then
       CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
       echo "[STARTED] (${CIP})"
+      SUCCESS="1"
+    else
+      echo "[FAILED]"
+    fi
+  done
+  if [ "$SUCCESS" == "1" ]; then update_hosts; fi
+}
+
+docker_stop () {
+  if [ "$#" -gt 0 ]; then
+    NODES="$@"
+    NIDS="$#"
+  else
+    NODES=$(docker ps -q | tac)
+    NIDS=$(echo "${NODES}" | wc -l)
+  fi
+  if [ -n "${NODES}" ]; then
+    S=$(singular_plural $NIDS)
+    echo "Stopping ${NIDS} node${S}:"
+  else
+    echo "No running containers found"
+    return 0
+  fi
+  SUCCESS="0"
+  for NODE in $NODES; do
+    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+      echo "- ${NODE} [NOT FOUND]"
+      continue
+    else
+      if [ "$CSTATE" = "false" ]; then
+        echo "- ${NODE} [ALREADY STOPPED]"
+        continue;
+      fi
+    fi
+    CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
+    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+    echo -n "- ${CHOSTNAME} (${CIP}) "
+    if docker stop "${NODE}" &>/dev/null; then
+      echo "[STOPPED]"
       SUCCESS="1"
     else
       echo "[FAILED]"
@@ -259,25 +267,38 @@ docker_list () {
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
     CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${ID}")
     CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
-    CSTATE=$(docker inspect --format '{{ .State.Running }}' "${ID}")
-    if [ "${CSTATE}" == "true" ]; then
-      echo "- ${CHOSTNAME}.${CDOMAIN} [RUNNING] (${CIP})"
+    RUNNING=$(docker inspect --format '{{ .State.Running }}' "${ID}")
+    echo -n "- ${ID}"
+    if [ "${RUNNING}" == "true" ]; then
+      echo -n " [RUNNING]"
     else
-      echo "- ${CHOSTNAME}.${CDOMAIN} [STOPPED]"
+      echo -n " [STOPPED]"
     fi
-  done
+    echo -n " ${CHOSTNAME}"
+    if [ -n "${CDOMAIN}" ]; then
+      echo -n ".${CDOMAIN}"
+    fi
+    if [ -n "${CIP}" ]; then
+    echo -n " (${CIP})"
+    fi
+    echo
+ done
 }
 
 update_hosts () {
   echo -n "Updating /etc/hosts file "
   echo -e "127.0.0.1\tlocalhost.localdomain localhost" \
     > ${TMP_HOSTS}
-  IDS=$(docker ps -q -a | tac)
+  IDS=$(docker ps -q | tac)
   for ID in $IDS; do
     CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
     CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${ID}")
-    echo -e "${CIP}\t${CHOSTNAME}.${CDOMAIN} ${CHOSTNAME}" >> ${TMP_HOSTS}
+    echo -ne "${CIP}\t" >> ${TMP_HOSTS}
+    if [ -n "${CDOMAIN}" ]; then    
+      echo -n "${CHOSTNAME}.${CDOMAIN} " >> ${TMP_HOSTS}
+    fi
+    echo "${CHOSTNAME}" >> ${TMP_HOSTS}
   done
   if sudo mv ${TMP_HOSTS} /etc/hosts &>/dev/null; then
     echo -n "[OK]"
@@ -339,29 +360,56 @@ case "$1" in
     done
     docker_run
     ;;
-  stop)
-    if [ $# -ge 2 ]; then
-      NODES="${@:2}"
-    else
-      NODES=""
-    fi
-    docker_stop $NODES
-    ;;
   start)
     if [ $# -ge 2 ]; then
       NODES="${@:2}"
     else
-      NODES=""
+      echo "Please specify containers to be started."
+      exit 1
     fi
     docker_start $NODES
+    ;;
+  startall)
+    if [ $# -ne 1 ]; then
+      echo "Incorrect number of arguments, do you really want to start all containers?"
+      exit 1
+    fi
+    docker_start
+    ;;
+  stop)
+    if [ $# -ge 2 ]; then
+      NODES="${@:2}"
+    else
+      echo "Please specify containers to be stopped."
+      exit 1
+    fi
+    docker_stop $NODES
+    ;;
+  stopall)
+    if [ $# -ne 1 ]; then
+      echo "Incorrect number of arguments, do you really want to stop all containers?"
+      exit 1
+    fi
+    docker_stop
     ;;
   rm)
     if [ $# -ge 2 ]; then
       NODES="${@:2}"
     else
-      NODES=""
+      echo "Please specify containers to be removed."
+      exit 1
     fi
     docker_rm $NODES
+    ;;
+  rmall)
+    if [ $# -ne 1 ]; then
+      echo "Incorrect number of arguments, do you really want to remove all containers?"
+      exit 1
+    fi
+    docker_rm
+    ;;
+  hosts)
+    update_hosts
     ;;
   list)
     docker_list
@@ -374,7 +422,6 @@ case "$1" in
     display_help
     exit 0
     ;;
-
   *)
     echo "Invalid command: ${1}"
     exit 1
