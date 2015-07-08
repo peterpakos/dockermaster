@@ -149,6 +149,7 @@ docker_start () {
   fi
   SUCCESS="0"
   for NODE in $NODES; do
+    NODE=${NODE%%.*}
     if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
       continue
@@ -188,6 +189,7 @@ docker_stop () {
   fi
   SUCCESS="0"
   for NODE in $NODES; do
+    NODE=${NODE%%.*}
     if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
       continue
@@ -227,6 +229,7 @@ docker_rm () {
   fi
   SUCCESS="0"
   for NODE in $NODES; do
+    NODE=${NODE%%.*}
     if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
       continue
