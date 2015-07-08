@@ -15,7 +15,7 @@ set -o pipefail
 
 N="1"
 HOSTNAME="node"
-DOMAIN="localdomain"
+DOMAIN=""
 IMAGE="wandisco/centos6"
 
 _VERSION="15.7.8"
@@ -107,26 +107,29 @@ docker_run () {
 
   for ((i=1;i<=N;i++)); do
     if [ $N -eq 1 ]; then
-      CHOSTNAME="${HOSTNAME}"
+      HD="${HOSTNAME}"
     else
-      CHOSTNAME="${HOSTNAME}${i}"
+      HD="${HOSTNAME}${i}"
     fi
-    echo -n "- ${CHOSTNAME}.${DOMAIN} "
-    if docker inspect "${CHOSTNAME}" &>/dev/null; then
-      echo "[ALREADY EXISTS]"
+    if [ -n "${DOMAIN}" ]; then
+      HD="${HD}.${DOMAIN}"
+    fi
+    echo -n "- ${HD}"
+    if docker inspect "${HD}" &>/dev/null; then
+      echo " [ALREADY EXISTS]"
       continue
     fi
     if docker run -d \
-      --name "${CHOSTNAME}" \
-      --hostname "${CHOSTNAME}.${DOMAIN}" \
+      --name "${HD}" \
+      --hostname "${HD}" \
       --volume /usr/java:/usr/java \
       "${IMAGE}" &>/dev/null; then
-      CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' \
-        "${CHOSTNAME}")
-      echo "(${CIP}) [OK]"
+      IP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' \
+        "${HD}")
+      echo " (${IP}) [OK]"
       SUCCESS="1"
     else
-      echo "[FAILED]"
+      echo " [FAILED]"
     fi
   done
   if [ "$SUCCESS" == "1" ]; then update_hosts; fi
@@ -149,24 +152,25 @@ docker_start () {
   fi
   SUCCESS="0"
   for NODE in $NODES; do
-    NODE=${NODE%%.*}
-    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+    if ! RUNNING=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
       continue
     else
-      if [ "$CSTATE" = "true" ]; then
+      if [ "$RUNNING" = "true" ]; then
         echo "- ${NODE} [ALREADY RUNNING]"
         continue;
       fi
     fi
-    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
-    echo -n "- ${CHOSTNAME} "
+    HD=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+    DOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${NODE}")
+    if [ -n "${DOMAIN}" ]; then HD="${HD}.${DOMAIN}"; fi
+    echo -n "- ${HD}"
     if docker start "${NODE}" &>/dev/null; then
-      CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
-      echo "[STARTED] (${CIP})"
+      IP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
+      echo " (${IP}) [STARTED]"
       SUCCESS="1"
     else
-      echo "[FAILED]"
+      echo " [FAILED]"
     fi
   done
   if [ "$SUCCESS" == "1" ]; then update_hosts; fi
@@ -189,24 +193,25 @@ docker_stop () {
   fi
   SUCCESS="0"
   for NODE in $NODES; do
-    NODE=${NODE%%.*}
-    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+    if ! RUNNING=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
       continue
     else
-      if [ "$CSTATE" = "false" ]; then
+      if [ "$RUNNING" = "false" ]; then
         echo "- ${NODE} [ALREADY STOPPED]"
         continue;
       fi
     fi
-    CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
-    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
-    echo -n "- ${CHOSTNAME} (${CIP}) "
+    IP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
+    HD=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+    DOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${NODE}")
+    if [ -n "${DOMAIN}" ]; then HD="${HD}.${DOMAIN}"; fi
+    echo -n "- ${HD} (${IP})"
     if docker stop "${NODE}" &>/dev/null; then
-      echo "[STOPPED]"
+      echo " [STOPPED]"
       SUCCESS="1"
     else
-      echo "[FAILED]"
+      echo " [FAILED]"
     fi
   done
   if [ "$SUCCESS" == "1" ]; then update_hosts; fi
@@ -229,63 +234,66 @@ docker_rm () {
   fi
   SUCCESS="0"
   for NODE in $NODES; do
-    NODE=${NODE%%.*}
-    if ! CSTATE=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
+    if ! RUNNING=$(docker inspect --format '{{ .State.Running }}' "${NODE}" 2>/dev/null); then
       echo "- ${NODE} [NOT FOUND]"
       continue
     else
-      CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
-      CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${NODE}")
-      echo -n "- ${CHOSTNAME}.${CDOMAIN} "
-      if [ "$CSTATE" = "true" ]; then
-        echo -n "[STOPPING] "
-        if ! docker stop "${NODE}" &>/dev/null; then
-          echo "[FAILED]"
+      HD=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
+      DOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${NODE}")
+      if [ -n "${DOMAIN}" ]; then HD="${HD}.${DOMAIN}"; fi
+      echo -n "- ${HD}"
+      if [ "$RUNNING" = "true" ]; then
+        IP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${NODE}")
+        echo -n " (${IP})"
+        if docker stop "${NODE}" &>/dev/null; then
+          echo -n " [STOPPED]"
+          SUCCESS="1"
+        else
+          echo " [FAILED]"
           continue
         fi
       fi
     fi
-    CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${NODE}")
     if docker rm "${NODE}" &>/dev/null; then
-      echo "[REMOVED]"
+      echo " [REMOVED]"
       SUCCESS="1"
     else
-      echo "[FAILED]"
+      echo " [FAILED]"
     fi
   done
   if [ "$SUCCESS" == "1" ]; then update_hosts; fi
 }
 
 docker_list () {
-  IDS=$(docker ps -q -a | tac)
+  IDS=$(docker ps -qa | tac)
   if [ -n "${IDS}" ]; then
     NIDS=$(echo "${IDS}" | wc -l)
     S=$(singular_plural $NIDS)
-    echo "Found ${NIDS} container${S}:"
   else
     echo "No containers found"
-    return 0
+    exit 0
   fi
+  FORMAT="%-14s%-22s%-9s%-15s%s\n"
+  printf "${FORMAT}" "ID" "NAME" "STATE" "IP" "HOSTNAME"
   for ID in $IDS; do
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
     CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${ID}")
     CIP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' "${ID}")
     RUNNING=$(docker inspect --format '{{ .State.Running }}' "${ID}")
-    echo -n "- ${ID}"
+    NAME=$(docker inspect --format '{{ .Name }}' "${ID}" | sed 's@/@@')
     if [ "${RUNNING}" == "true" ]; then
-      echo -n " [RUNNING]"
+      STATE="RUNNING"
     else
-      echo -n " [STOPPED]"
+      STATE="STOPPED"
     fi
-    echo -n " ${CHOSTNAME}"
     if [ -n "${CDOMAIN}" ]; then
-      echo -n ".${CDOMAIN}"
+      HD="${CHOSTNAME}.${CDOMAIN}"
+    else
+      HD="${CHOSTNAME}"
     fi
-    if [ -n "${CIP}" ]; then
-    echo -n " (${CIP})"
-    fi
-    echo
- done
+    printf "${FORMAT}" "${ID}" "${NAME}" "${STATE}" "${CIP}" "${HD}"
+  done
+  echo -e "\nCONTAINER COUNT: ${NIDS}"
 }
 
 update_hosts () {
