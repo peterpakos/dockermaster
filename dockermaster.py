@@ -1,19 +1,14 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # Python template
 #
 # Author: Peter Pakos
 # Copyright (C) 2015
 
-# Import modules
-try:
-    import sys
-    import getopt
-    import os
-    from docker import Client
-except ImportError as err:
-    print >> sys.stderr, "Import Error: %s" % err
-    sys.exit(1)
+import sys
+import getopt
+import os
+from docker import Client
 
 
 # Main class
@@ -21,7 +16,6 @@ class Main(object):
     app_version = "1.0"
     app_name = os.path.basename(sys.argv[0])
 
-    # Constructor method
     def __init__(self):
         self.test = self.parse_options()
 
@@ -76,6 +70,7 @@ class Main(object):
         if message is not None:
             print message
         sys.exit(code)
+
 
 # Instantiate main class and run it
 if __name__ == '__main__':

@@ -2,23 +2,18 @@
 #
 # Script for managing docker containers
 #
-# Copyright © 2015 Peter Pakos
+# Author: Peter Pakos <peter.pakos@wandisco.com>
 
-### Runtime settings
-
-set -o errexit  # -e
-set -o errtrace # -E
-set -o nounset  # -u
-set -o pipefail
+set -euo pipefail
 
 ### Variables
 
 N="1"
 HOSTNAME="node"
 DOMAIN=""
-IMAGE="wandisco/centos6"
+IMAGE="wandisco/centos7_x64"
 
-_VERSION="15.7.8"
+_VERSION="16.7.6"
 _DIR="$(cd "$(dirname "${0}")" && pwd)"
 _FILE="$(basename "${0}")"
 _HOSTNAME=$(hostname -s)
@@ -119,7 +114,12 @@ docker_run () {
       echo " [ALREADY EXISTS]"
       continue
     fi
+    if [[ "$(docker images -q ${IMAGE} 2>/dev/null)" == "" ]]; then
+      printf " [IMAGE ${IMAGE} DOES NOT EXIST]\n"
+      continue
+    fi
     if docker run -d \
+      --privileged \
       --name "${HD}" \
       --hostname "${HD}" \
       --volume /usr/java:/usr/java \
@@ -306,7 +306,7 @@ update_hosts () {
     CHOSTNAME=$(docker inspect --format '{{ .Config.Hostname }}' "${ID}")
     CDOMAIN=$(docker inspect --format '{{ .Config.Domainname }}' "${ID}")
     echo -ne "${CIP}\t" >> ${TMP_HOSTS}
-    if [ -n "${CDOMAIN}" ]; then    
+    if [ -n "${CDOMAIN}" ]; then
       echo -n "${CHOSTNAME}.${CDOMAIN} " >> ${TMP_HOSTS}
     fi
     echo "${CHOSTNAME}" >> ${TMP_HOSTS}
