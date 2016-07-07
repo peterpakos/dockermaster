@@ -1,78 +1,80 @@
 #!/usr/bin/env python
 #
-# Python template
+# Script for managing Docker containers
 #
-# Author: Peter Pakos
-# Copyright (C) 2015
+# Author: Peter Pakos <peter.pakos@wandisco.com>
 
-import sys
-import getopt
-import os
-from docker import Client
+from __future__ import print_function
+
+from argparse import ArgumentParser
+from os import path
+from sys import stderr, argv
+
+from docker import Client, errors
+from prettytable import PrettyTable
+from requests import exceptions
 
 
-# Main class
 class Main(object):
-    app_version = "1.0"
-    app_name = os.path.basename(sys.argv[0])
+    __version = '16.6.22'
+    __name = path.basename(argv[0])
+    __docker_host = 'unix://var/run/docker.sock'
+    __cli = None
 
     def __init__(self):
-        self.test = self.parse_options()
+        action = self.parse_args()
 
-    # Parse arguments
-    def parse_options(self):
         try:
-            options, args = getopt.getopt(sys.argv[1:], "hv", [
-                "help",
-                "version"
-            ])
-        except getopt.GetoptError as err:
-            self.error("Error: %s" % err)
-            self.usage()
-            self.die(1)
+            self.__cli = Client(base_url=self.__docker_host)
+        except errors.DockerException as err:
+            self.die(err.message)
 
-        for opt, arg in options:
-            if opt in ("-h", "--help"):
-                self.usage()
-                self.die()
-            if opt in ("-v", "--version"):
-                self.version()
-                self.die()
+        if action == 'list':
+            self.display_list()
 
-    # Display version
-    def version(self):
-        print "%s version %s" % (self.app_name, self.app_version)
+    def __del__(self):
+        if self.__cli:
+            self.__cli.close()
 
-    # Display help page
-    def usage(self):
-        self.version()
-        print "Usage: %s [OPTIONS]" % self.app_name
-        print "AVAILABLE OPTIONS:"
-        print "-h\t\tPrint this help summary page"
-        print "-v\t\tPrint version number"
-
-    def error(self, message=None):
+    @staticmethod
+    def die(message=None, code=1):
         if message is not None:
-            print >> sys.stderr, message
+            print(message, file=stderr)
+        exit(code)
 
-    # App code to be run
-    def run(self):
-        c = Client(base_url='unix:///var/run/docker.sock')
+    def parse_args(self):
+        parser = ArgumentParser()
+        parser.add_argument('-v', '--version',
+                            help='show version', action="store_true")
+        parser.add_argument('action', help='dupa', choices=['list'])
+        parser.add_argument('-H', '--host', help='Socket or URL to bind to (default: unix:///var/run/docker.sock)')
+        args = parser.parse_args()
+        if args.version:
+            self.display_version()
+            exit()
+        if args.host:
+            self.__docker_host = args.host
+        return args.action
+
+    def display_version(self):
+        print('%s version %s' % (self.__name, self.__version))
+
+    def display_list(self):
+        containers = None
         try:
-            c.containers()
-        except:
-            e = sys.exc_info()[1]
-            print >> sys.stderr, "Error: %s" % str(e)
-            sys.exit(1)
+            containers = self.__cli.containers(all=True)
+        except exceptions.ConnectionError:
+            self.die('Problem connecting to Docker Host')
 
-    # Exit app with code and optional message
-    def die(self, code=0, message=None):
-        if message is not None:
-            print message
-        sys.exit(code)
+        print('Containers found: %s' % len(containers))
+        if containers:
+            table = PrettyTable(['Name', 'IP Address', 'Image', 'Status'])
+            for container in containers:
+                table.add_row([container['Names'][0].replace('/', ''),
+                               container['NetworkSettings']['Networks']['bridge']['IPAddress'],
+                               container['Image'], container['Status']])
+            print(table)
 
 
-# Instantiate main class and run it
 if __name__ == '__main__':
     app = Main()
-    app.run()
